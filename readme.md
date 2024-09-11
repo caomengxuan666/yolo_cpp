@@ -23,3 +23,5 @@ CMAKE中的OPENCV路径也要根据你的本机进行修改
 
 weight文件需要自行下载
 [https://pjreddie.com/media/files/yolov3.weights](https://github.com/patrick013/Object-Detection---Yolov3/blob/master/model/yolov3.weights)
+
+可以下载release直接使用
