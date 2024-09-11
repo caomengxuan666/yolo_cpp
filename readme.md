@@ -20,3 +20,6 @@ CMAKE中的OPENCV路径也要根据你的本机进行修改
 
 ## 参数设置
 你可以调整使用的模型和模型的weight文件，以及NMS和置信度的阈值。
+
+weight文件需要自行下载
+[https://pjreddie.com/media/files/yolov3.weights](https://github.com/patrick013/Object-Detection---Yolov3/blob/master/model/yolov3.weights)
