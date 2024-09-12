@@ -1,6 +1,7 @@
 #pragma once
 
 #include "Net_config.h"
+#include "ThreadPool.hpp"
 #include "darknet.h"
 #include <fstream>
 #include <iostream>
@@ -9,7 +10,6 @@
 #include <random>
 #include <string>
 #include <vector>
-#include "ThreadPool.hpp"
 
 
 class YOLO_CMX {
@@ -52,7 +52,7 @@ public:
         this->net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
         this->net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 
-        device="CPU";
+        device = "CPU";
 
         //置信度设置
         this->confThreshold = config.confThreshold;
@@ -62,20 +62,20 @@ public:
     }
 
     //默认使用GPU 如果opencv没有启用CUDA支持，也会自动换回CPU
-    void detect(cv::Mat frame,bool showRaw=false,bool save=false,bool gpu=false) {
+    void detect(cv::Mat frame, bool showRaw = false, bool save = false, bool gpu = false,bool dbg= true) {
         auto raw_size = frame.size();
         //std::cout << "推理图像原始宽度: " << raw_size.width << "\t 推理图像原始高度: " << raw_size.height << std::endl;
 
         cv::Mat blob;
 
         // 使用 GPU 推理
-        static bool init=false;
-        if(!init){
-            std::cout<<"初始化成功"<<std::endl;
-            if(gpu){
+        static bool init = false;
+        if (!init) {
+            std::cout << "初始化成功" << std::endl;
+            if (gpu) {
                 this->net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);// 设置后端为 CUDA
                 this->net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);  // 设置目标为 CUDA
-                device="GPU";
+                device = "GPU";
             }
 
 
@@ -84,15 +84,15 @@ public:
                 return;
             }
         }
-        init=true;
+        init = true;
         //this->inpWidth=416;
         //this->inpHeight=416;
         cv::dnn::blobFromImage(frame, blob, 1 / 255.0, cv::Size(this->inpWidth, this->inpHeight), cv::Scalar(0, 0, 0), true, false);
         // 打印 Blob 形状
         //std::cout << "Blob shape: " << blob.size << std::endl;
 
-        if(showRaw)
-        imshow("Raw_Pic", frame);
+        if (showRaw)
+            imshow("Raw_Pic", frame);
 
         //std::cout << "inpWidth: " << inpWidth << std::endl;
         //std::cout << "inpHeight: " << inpHeight << std::endl;
@@ -109,6 +109,8 @@ public:
         this->net.forward(outs, outputLayerNames);
         // 进行后处理
         this->postprocess(frame, outs);
+
+
         // 将 frame 调整到原始输入大小
         cv::resize(frame, frame, raw_size);
 
@@ -124,21 +126,21 @@ public:
         //使用的yolo版本
         putText(frame, netname, cv::Point(0, 90), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
         //使用的硬件
-        std::string device_name="detect_device:"+device;
+        std::string device_name = "detect_device:" + device;
         putText(frame, device_name, cv::Point(0, 120), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
 
         // 保存推理结果
-        if(save)
-        imwrite(cv::format("%s_out.jpg", this->netname), frame);
+        if (save)
+            imwrite(cv::format("%s_out.jpg", this->netname), frame);
     }
 
 
-    void detect_video(cv::VideoCapture& video, bool save = false) {
+    void detect_video(cv::VideoCapture &video, bool save = false) {
         //设置video的尺寸
-        video.set(cv::CAP_PROP_FRAME_WIDTH,640);
-        video.set(cv::CAP_PROP_FRAME_HEIGHT,480);
+        video.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+        video.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
         //设置video的fps
-        video.set(cv::CAP_PROP_FPS,30);
+        video.set(cv::CAP_PROP_FPS, 30);
 
         if (!video.isOpened()) {
             std::cerr << "Error: Video capture not opened." << std::endl;
@@ -158,16 +160,16 @@ public:
         cv::Mat frame;
         cv::VideoWriter writer;
         if (save) {
-            int codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');  // 编码格式
-            double fps = video.get(cv::CAP_PROP_FPS);  // 视频帧率
-            cv::Size size(video.get(cv::CAP_PROP_FRAME_WIDTH), video.get(cv::CAP_PROP_FRAME_HEIGHT));  // 视频尺寸
-            std::string outputFilename = "output.avi";  // 输出文件名
+            int codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');                                 // 编码格式
+            double fps = video.get(cv::CAP_PROP_FPS);                                                // 视频帧率
+            cv::Size size(video.get(cv::CAP_PROP_FRAME_WIDTH), video.get(cv::CAP_PROP_FRAME_HEIGHT));// 视频尺寸
+            std::string outputFilename = "output.avi";                                               // 输出文件名
             writer.open(outputFilename, codec, fps, size, true);
         }
 
         while (video.read(frame)) {
             //设置frame 的尺寸
-           //cv::resize(frame,frame, cv::Size(640, 480));
+            //cv::resize(frame,frame, cv::Size(640, 480));
             if (frame.empty()) {
                 std::cerr << "Error: Frame is empty." << std::endl;
                 stopFlag = true;
@@ -175,10 +177,10 @@ public:
             }
 
             cv::Mat detectFrame = frame.clone();
-            detect(detectFrame);  // 推理处理
+            detect(detectFrame);// 推理处理
 
             if (save) {
-                writer.write(detectFrame);  // 写入帧
+                writer.write(detectFrame);// 写入帧
             }
 
             // 将推理结果放入队列供显示线程使用
@@ -194,7 +196,7 @@ public:
 
         video.release();
         if (save) {
-            writer.release();  // 释放视频写入器
+            writer.release();// 释放视频写入器
         }
         cv::destroyAllWindows();
     }
@@ -210,8 +212,8 @@ public:
 
         cv::Mat frame;
         //设置video的尺寸
-        video.set(cv::CAP_PROP_FRAME_WIDTH,640);
-        video.set(cv::CAP_PROP_FRAME_HEIGHT,480);
+        video.set(cv::CAP_PROP_FRAME_WIDTH, 640);
+        video.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
         while (video.read(frame)) {
             if (frame.empty()) {
                 std::cerr << "Error: Frame is empty." << std::endl;
@@ -221,13 +223,13 @@ public:
             // 创建 frame 的副本，以便在线程池中处理
             cv::Mat frame_copy = frame.clone();
             pool.enqueue([this, frame_copy]() {
-                this->detect(frame_copy);  // 使用副本
-               std::cout<<"入队"<<std::endl;
+                this->detect(frame_copy);// 使用副本
+                std::cout << "入队" << std::endl;
             });
 
             // 显示处理后的帧
             cv::imshow(kWinName, frame);
-            auto q = cv::waitKey(1);  // 每帧等待1毫秒
+            auto q = cv::waitKey(1);// 每帧等待1毫秒
             if (q == 'q') break;
         }
 
@@ -284,7 +286,6 @@ private:
     std::string device;
 
 
-
     void postprocess(cv::Mat &frame, const std::vector<cv::Mat> &outs) {
         std::vector<int> classIds;
         std::vector<float> confidences;
@@ -328,7 +329,7 @@ private:
                            box.x + box.width, box.y + box.height, frame);
         }
     }
-    void drawPred(int classId, float conf, int left, int top, int right, int bottom, cv::Mat &frame) {
+    void drawPred(int classId, float conf, int left, int top, int right, int bottom, cv::Mat &frame,int dbg=true) {
         // 定义颜色映射
         constexpr size_t default_seed = 42;
 
@@ -364,14 +365,18 @@ private:
         top = std::max(top, labelSize.height);
         cv::rectangle(frame, cv::Point(left, top - int(1.6 * labelSize.height)), cv::Point(left + int(1.5 * labelSize.width), top + baseLine), color, cv::FILLED);
         cv::putText(frame, label, cv::Point(left, top), cv::FONT_HERSHEY_TRIPLEX, 0.75, cv::Scalar(255, 255, 255), 1);// 文本颜色为白色
+
+        //打印所有的识别到的名称，矩形框范围，置信度
+        std::cout << "识别到：" << label<<std::endl;
+
     }
     // 显示函数
-    void displayVideo(std::queue<cv::Mat>& frameQueue, std::atomic<bool>& stopFlag, std::mutex& queueMutex) {
+    void displayVideo(std::queue<cv::Mat> &frameQueue, std::atomic<bool> &stopFlag, std::mutex &queueMutex) {
         static const std::string kWinName = "检测结果，按q退出";
-
 
         while (!stopFlag) {
             std::unique_lock<std::mutex> lock(queueMutex);
+
             if (!frameQueue.empty()) {
                 cv::Mat frame = frameQueue.front();
                 frameQueue.pop();
@@ -380,6 +385,9 @@ private:
                 cv::imshow(kWinName, frame);
                 if (cv::waitKey(1) == 'q') {
                     stopFlag = true;
+                    break;
+                }
+                if (stopFlag == true) {
                     break;
                 }
             } else {
