@@ -346,7 +346,6 @@ private:
                     hashValue % 256);
         } else {
             color = cv::Scalar(0, 0, 255);// 如果类别 ID 无效，默认使用红色
-            color = cv::Scalar(0, 0, 255);// 如果类别 ID 无效，默认使用红色
         }
 
         // 绘制边界框
