@@ -3,10 +3,12 @@ project(yolo_cpp)
 
 set(CMAKE_CXX_STANDARD 17)
 
+# o2优化
+add_compile_options(-O2)
+
 # 设置头文件搜索路径
 include_directories(
         include
-        include/opencv2
 )
 
 # 查找 pthread 库（适用于 MSVC 的特殊处理）
@@ -25,7 +27,9 @@ find_library(OpenCV_LIBRARIES NAMES opencv_world4100 PATHS /lib REQUIRED)
 find_library(DARKNET_LIBRARY NAMES darknet.lib PATHS /lib REQUIRED)
 
 # 添加可执行文件
-add_executable(yolo_cpp src/main.cpp)
+add_executable(yolo_cpp src/main.cpp
+        src/ThreadPool.hpp
+)
 
 # 链接库文件
 target_link_libraries(yolo_cpp

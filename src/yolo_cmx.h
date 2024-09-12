@@ -4,10 +4,12 @@
 #include "darknet.h"
 #include <fstream>
 #include <iostream>
-#include <opencv.hpp>
 #include <opencv2/dnn.hpp>
+#include <opencv2/opencv.hpp>
+#include <random>
 #include <string>
 #include <vector>
+#include "ThreadPool.hpp"
 
 
 class YOLO_CMX {
@@ -50,6 +52,8 @@ public:
         this->net.setPreferableBackend(cv::dnn::DNN_BACKEND_OPENCV);
         this->net.setPreferableTarget(cv::dnn::DNN_TARGET_CPU);
 
+        device="CPU";
+
         //置信度设置
         this->confThreshold = config.confThreshold;
         this->nmsThreshold = config.nmsThreshold;
@@ -58,42 +62,53 @@ public:
     }
 
     //默认使用GPU 如果opencv没有启用CUDA支持，也会自动换回CPU
-    void detect(cv::Mat &frame) {
+    void detect(cv::Mat frame,bool showRaw=false,bool save=false,bool gpu=false) {
         auto raw_size = frame.size();
-        std::cout << "推理图像原始宽度: " << raw_size.width << "\t 推理图像原始高度: " << raw_size.height << std::endl;
+        //std::cout << "推理图像原始宽度: " << raw_size.width << "\t 推理图像原始高度: " << raw_size.height << std::endl;
 
         cv::Mat blob;
-        cv::dnn::blobFromImage(frame, blob, 1 / 255.0, cv::Size(this->inpWidth, this->inpHeight), cv::Scalar(0, 0, 0), true, false);
-        imshow("Raw_Pic", frame);
-
-        std::cout << "inpWidth: " << inpWidth << std::endl;
-        std::cout << "inpHeight: " << inpHeight << std::endl;
 
         // 使用 GPU 推理
-        this->net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);// 设置后端为 CUDA
-        this->net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);  // 设置目标为 CUDA
+        static bool init=false;
+        if(!init){
+            std::cout<<"初始化成功"<<std::endl;
+            if(gpu){
+                this->net.setPreferableBackend(cv::dnn::DNN_BACKEND_CUDA);// 设置后端为 CUDA
+                this->net.setPreferableTarget(cv::dnn::DNN_TARGET_CUDA);  // 设置目标为 CUDA
+                device="GPU";
+            }
+
+
+            if (this->net.empty()) {
+                std::cerr << "Error: Network is empty. Model may not have loaded correctly." << std::endl;
+                return;
+            }
+        }
+        init=true;
+        //this->inpWidth=416;
+        //this->inpHeight=416;
+        cv::dnn::blobFromImage(frame, blob, 1 / 255.0, cv::Size(this->inpWidth, this->inpHeight), cv::Scalar(0, 0, 0), true, false);
+        // 打印 Blob 形状
+        //std::cout << "Blob shape: " << blob.size << std::endl;
+
+        if(showRaw)
+        imshow("Raw_Pic", frame);
+
+        //std::cout << "inpWidth: " << inpWidth << std::endl;
+        //std::cout << "inpHeight: " << inpHeight << std::endl;
 
         // 输入 blob 到网络中
         this->net.setInput(blob);
-
-        if (this->net.empty()) {
-            std::cerr << "Error: Network is empty. Model may not have loaded correctly." << std::endl;
-            return;
-        }
-
-        std::vector<cv::String> outputLayerNames = this->net.getUnconnectedOutLayersNames();
+        static std::vector<cv::String> outputLayerNames = this->net.getUnconnectedOutLayersNames();
         if (outputLayerNames.empty()) {
             std::cerr << "Error: Unable to retrieve output layer names." << std::endl;
             return;
         }
-
         // 执行前向推理
-        std::vector<cv::Mat> outs;
+        static std::vector<cv::Mat> outs;
         this->net.forward(outs, outputLayerNames);
-
         // 进行后处理
         this->postprocess(frame, outs);
-
         // 将 frame 调整到原始输入大小
         cv::resize(frame, frame, raw_size);
 
@@ -102,11 +117,124 @@ public:
         double freq = cv::getTickFrequency() / 1000;
         double t = net.getPerfProfile(layersTimes) / freq;
         std::string label = cv::format("%s Inference time : %.2f ms", this->netname, t);
+        //fps
+        std::string fps_label = cv::format("FPS: %.2f", 1000 / t);
         putText(frame, label, cv::Point(0, 30), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
+        putText(frame, fps_label, cv::Point(0, 60), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
+        //使用的yolo版本
+        putText(frame, netname, cv::Point(0, 90), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
+        //使用的硬件
+        std::string device_name="detect_device:"+device;
+        putText(frame, device_name, cv::Point(0, 120), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
 
         // 保存推理结果
+        if(save)
         imwrite(cv::format("%s_out.jpg", this->netname), frame);
     }
+
+
+    void detect_video(cv::VideoCapture& video, bool save = false) {
+        //设置video的尺寸
+        video.set(cv::CAP_PROP_FRAME_WIDTH,640);
+        video.set(cv::CAP_PROP_FRAME_HEIGHT,480);
+        //设置video的fps
+        video.set(cv::CAP_PROP_FPS,30);
+
+        if (!video.isOpened()) {
+            std::cerr << "Error: Video capture not opened." << std::endl;
+            return;
+        }
+
+        std::atomic<bool> stopFlag(false);
+        std::queue<cv::Mat> frameQueue;
+        std::mutex queueMutex;
+
+        // 使用 lambda 捕获 this 指针
+
+        std::thread displayThread([this, &frameQueue, &stopFlag, &queueMutex]() {
+            this->displayVideo(frameQueue, stopFlag, queueMutex);
+        });
+
+        cv::Mat frame;
+        cv::VideoWriter writer;
+        if (save) {
+            int codec = cv::VideoWriter::fourcc('M', 'J', 'P', 'G');  // 编码格式
+            double fps = video.get(cv::CAP_PROP_FPS);  // 视频帧率
+            cv::Size size(video.get(cv::CAP_PROP_FRAME_WIDTH), video.get(cv::CAP_PROP_FRAME_HEIGHT));  // 视频尺寸
+            std::string outputFilename = "output.avi";  // 输出文件名
+            writer.open(outputFilename, codec, fps, size, true);
+        }
+
+        while (video.read(frame)) {
+            //设置frame 的尺寸
+           //cv::resize(frame,frame, cv::Size(640, 480));
+            if (frame.empty()) {
+                std::cerr << "Error: Frame is empty." << std::endl;
+                stopFlag = true;
+                break;
+            }
+
+            cv::Mat detectFrame = frame.clone();
+            detect(detectFrame);  // 推理处理
+
+            if (save) {
+                writer.write(detectFrame);  // 写入帧
+            }
+
+            // 将推理结果放入队列供显示线程使用
+            {
+                std::lock_guard<std::mutex> lock(queueMutex);
+                frameQueue.push(detectFrame);
+            }
+
+            if (stopFlag) break;
+        }
+
+        displayThread.join();
+
+        video.release();
+        if (save) {
+            writer.release();  // 释放视频写入器
+        }
+        cv::destroyAllWindows();
+    }
+
+    void detect_video(cv::VideoCapture &video, ThreadPool &pool) {
+        // 在函数开始时创建窗口
+        static const std::string kWinName = "检测结果，按q退出";
+
+        if (!video.isOpened()) {
+            std::cerr << "Error: Video capture not opened." << std::endl;
+            return;
+        }
+
+        cv::Mat frame;
+        //设置video的尺寸
+        video.set(cv::CAP_PROP_FRAME_WIDTH,640);
+        video.set(cv::CAP_PROP_FRAME_HEIGHT,480);
+        while (video.read(frame)) {
+            if (frame.empty()) {
+                std::cerr << "Error: Frame is empty." << std::endl;
+                break;
+            }
+
+            // 创建 frame 的副本，以便在线程池中处理
+            cv::Mat frame_copy = frame.clone();
+            pool.enqueue([this, frame_copy]() {
+                this->detect(frame_copy);  // 使用副本
+               std::cout<<"入队"<<std::endl;
+            });
+
+            // 显示处理后的帧
+            cv::imshow(kWinName, frame);
+            auto q = cv::waitKey(1);  // 每帧等待1毫秒
+            if (q == 'q') break;
+        }
+
+        video.release();
+        cv::destroyAllWindows();
+    }
+
 
     void train(char *weight_file = nullptr, int *using_gpu = (int *) 0, int gpu_num = 1, int batchSize = 64, float thr = 0.5f, float iouThresh = 0.4f, int not_show = 0, int cl = 1, int calcMap = 0, char *save_path = nullptr, int map_epoch = 0, int show_img = 0, int benchmark_layer = 0, int m_jpeg = 0) {
         char *datacfg = const_cast<char *>(config.classesFile.c_str());       // 数据文件路径
@@ -153,6 +281,10 @@ private:
     char netname[20];
     std::vector<std::string> classes;
     cv::dnn::Net net;
+    std::string device;
+
+
+
     void postprocess(cv::Mat &frame, const std::vector<cv::Mat> &outs) {
         std::vector<int> classIds;
         std::vector<float> confidences;
@@ -197,21 +329,63 @@ private:
         }
     }
     void drawPred(int classId, float conf, int left, int top, int right, int bottom, cv::Mat &frame) {
-        //Draw a rectangle displaying the bounding box
-        cv::rectangle(frame, cv::Point(left, top), cv::Point(right, bottom), cv::Scalar(0, 0, 255), 1);
+        // 定义颜色映射
+        constexpr size_t default_seed = 42;
 
-        //Get the label for the class name and its confidence
+        static std::default_random_engine engine(default_seed);// 固定随机数种子
+        static std::uniform_int_distribution<int> dist(0, 255);
+
+        // 根据类别生成独特的颜色
+        cv::Scalar color;
+        if (classId >= 0) {// 确保类别 ID 是有效的
+            // 使用哈希函数生成独特的颜色
+            unsigned int hashValue = std::hash<int>()(classId);
+            color = cv::Scalar(
+                    (hashValue >> 16) % 256,
+                    (hashValue >> 8) % 256,
+                    hashValue % 256);
+        } else {
+            color = cv::Scalar(0, 0, 255);// 如果类别 ID 无效，默认使用红色
+            color = cv::Scalar(0, 0, 255);// 如果类别 ID 无效，默认使用红色
+        }
+
+        // 绘制边界框
+        cv::rectangle(frame, cv::Point(left, top), cv::Point(right, bottom), color, 1);
+
+        // 获取标签文本
         std::string label = cv::format("%.2f", conf);
         if (!this->classes.empty()) {
             CV_Assert(classId < (int) this->classes.size());
             label = this->classes[classId] + ":" + label;
         }
 
-        //Display the label at the top of the bounding box
+        // 显示标签
         int baseLine;
         cv::Size labelSize = cv::getTextSize(label, cv::FONT_HERSHEY_SIMPLEX, 0.5, 1, &baseLine);
         top = std::max(top, labelSize.height);
-        //rectangle(frame, Point(left, top - int(1.5 * labelSize.height)), Point(left + int(1.5 * labelSize.width), top + baseLine), Scalar(0, 255, 0), FILLED);
-        putText(frame, label, cv::Point(left, top), cv::FONT_HERSHEY_TRIPLEX, 0.75, cv::Scalar(0, 255, 0), 1);
+        cv::rectangle(frame, cv::Point(left, top - int(1.6 * labelSize.height)), cv::Point(left + int(1.5 * labelSize.width), top + baseLine), color, cv::FILLED);
+        cv::putText(frame, label, cv::Point(left, top), cv::FONT_HERSHEY_TRIPLEX, 0.75, cv::Scalar(255, 255, 255), 1);// 文本颜色为白色
+    }
+    // 显示函数
+    void displayVideo(std::queue<cv::Mat>& frameQueue, std::atomic<bool>& stopFlag, std::mutex& queueMutex) {
+        static const std::string kWinName = "检测结果，按q退出";
+
+
+        while (!stopFlag) {
+            std::unique_lock<std::mutex> lock(queueMutex);
+            if (!frameQueue.empty()) {
+                cv::Mat frame = frameQueue.front();
+                frameQueue.pop();
+                lock.unlock();
+
+                cv::imshow(kWinName, frame);
+                if (cv::waitKey(1) == 'q') {
+                    stopFlag = true;
+                    break;
+                }
+            } else {
+                lock.unlock();
+            }
+        }
     }
 };

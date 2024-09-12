@@ -3,11 +3,10 @@
 #include"utils.h"
 
 int main() {
-    //这里默认用v3,我只下载了v3的weight
-    YOLO_CMX yolo_model(yolo_nets[0]);
-    std::string folder_path = "../train2017";
-
-    detect_folder(folder_path, yolo_model);
+    YOLO_CMX yolo_model(yolo_nets[1]);
+    //std::string folder_path = "../dataset/test/img/train2017";
+    std::string folder_path = "../dataset/test/video";
+    detect_folder(folder_path, yolo_model,VIDEO);
 
     return 0;
 }
