@@ -2,7 +2,6 @@
 /cmake-build-release-visual-studio
 .idea
 *.weights
-/win_x64_release_v1.0.0
-/win_x64_release_v1.0.0.rar
 *.mp4
 *.rar
+win_x64_release_v1.1.0
