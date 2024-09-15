@@ -204,7 +204,10 @@ public:
         cv::Mat detectFrame = frame.clone();
         detect(detectFrame);// 推理处理
         cv::imshow("detect_frame", detectFrame);
-        cv::waitKey(1);
+        //按q退出
+        if (cv::waitKey(1) == 'q') {
+            _exit(0);
+        }
     }
 
 
