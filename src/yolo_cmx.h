@@ -16,7 +16,7 @@ class YOLO_CMX {
 
 public:
     YOLO_CMX() = delete;
-    YOLO_CMX(Net_config config) {
+    YOLO_CMX(const Net_config& config) {
 
         std::cout << "Net use " << config.netname << std::endl;
 
@@ -62,7 +62,7 @@ public:
     }
 
     //默认使用GPU 如果opencv没有启用CUDA支持，也会自动换回CPU
-    void detect(cv::Mat frame, bool showRaw = false, bool save = false, bool gpu = false,bool dbg= true) {
+    inline void detect(cv::Mat frame, bool showRaw = false, bool save = false, bool gpu = false, bool dbg = true) {
         auto raw_size = frame.size();
         //std::cout << "推理图像原始宽度: " << raw_size.width << "\t 推理图像原始高度: " << raw_size.height << std::endl;
 
@@ -128,7 +128,6 @@ public:
         //使用的硬件
         std::string device_name = "detect_device:" + device;
         putText(frame, device_name, cv::Point(0, 120), cv::FONT_HERSHEY_SIMPLEX, 1, cv::Scalar(0, 0, 255), 1);
-
         // 保存推理结果
         if (save)
             imwrite(cv::format("%s_out.jpg", this->netname), frame);
@@ -201,40 +200,11 @@ public:
         cv::destroyAllWindows();
     }
 
-    void detect_video(cv::VideoCapture &video, ThreadPool &pool) {
-        // 在函数开始时创建窗口
-        static const std::string kWinName = "检测结果，按q退出";
-
-        if (!video.isOpened()) {
-            std::cerr << "Error: Video capture not opened." << std::endl;
-            return;
-        }
-
-        cv::Mat frame;
-        //设置video的尺寸
-        video.set(cv::CAP_PROP_FRAME_WIDTH, 640);
-        video.set(cv::CAP_PROP_FRAME_HEIGHT, 480);
-        while (video.read(frame)) {
-            if (frame.empty()) {
-                std::cerr << "Error: Frame is empty." << std::endl;
-                break;
-            }
-
-            // 创建 frame 的副本，以便在线程池中处理
-            cv::Mat frame_copy = frame.clone();
-            pool.enqueue([this, frame_copy]() {
-                this->detect(frame_copy);// 使用副本
-                std::cout << "入队" << std::endl;
-            });
-
-            // 显示处理后的帧
-            cv::imshow(kWinName, frame);
-            auto q = cv::waitKey(1);// 每帧等待1毫秒
-            if (q == 'q') break;
-        }
-
-        video.release();
-        cv::destroyAllWindows();
+    inline void detect_video(cv::Mat &frame) {
+        cv::Mat detectFrame = frame.clone();
+        detect(detectFrame);// 推理处理
+        cv::imshow("detect_frame", detectFrame);
+        cv::waitKey(1);
     }
 
 
@@ -329,9 +299,9 @@ private:
                            box.x + box.width, box.y + box.height, frame);
         }
     }
-    void drawPred(int classId, float conf, int left, int top, int right, int bottom, cv::Mat &frame,int dbg=true) {
+    void drawPred(int classId, float conf, int left, int top, int right, int bottom, cv::Mat &frame, int dbg = true) {
         // 定义颜色映射
-        constexpr size_t default_seed = 42;
+        constexpr size_t default_seed = 20040820;
 
         static std::default_random_engine engine(default_seed);// 固定随机数种子
         static std::uniform_int_distribution<int> dist(0, 255);
@@ -367,8 +337,7 @@ private:
         cv::putText(frame, label, cv::Point(left, top), cv::FONT_HERSHEY_TRIPLEX, 0.75, cv::Scalar(255, 255, 255), 1);// 文本颜色为白色
 
         //打印所有的识别到的名称，矩形框范围，置信度
-        std::cout << "识别到：" << label<<std::endl;
-
+        std::cout << "识别到：" << label << std::endl;
     }
     // 显示函数
     void displayVideo(std::queue<cv::Mat> &frameQueue, std::atomic<bool> &stopFlag, std::mutex &queueMutex) {
